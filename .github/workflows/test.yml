@@ -1,0 +1,56 @@
+name: Test formula
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  install:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - name: Install with the documented command
+        run: brew install achjqz/tap/tongs
+
+      - name: Run the formula's test
+        run: brew test achjqz/tap/tongs
+
+      - name: Check the binary
+        run: |
+          command -v tongs
+          tongs --version
+          file "$(command -v tongs)"
+
+      - name: Preview and apply agent setup in a throwaway home
+        run: |
+          export HOME="$RUNNER_TEMP/home"
+          mkdir -p "$HOME"
+          tongs setup claude
+          test ! -e "$HOME/.claude/settings.json"
+          tongs setup claude --apply
+          tongs setup codex --apply
+          grep -F "$(command -v tongs) hook" "$HOME/.claude/settings.json"
+          test -f "$HOME/.claude/skills/tongs/SKILL.md"
+          test -f "$HOME/.codex/rules/tongs.rules"
+
+      - name: The guard blocks direct Keychain access
+        run: |
+          payload='{"tool_name":"Bash","tool_input":{"command":"security find-generic-password -s dev.tongs.secrets -w"}}'
+          set +e
+          printf '%s' "$payload" | tongs hook
+          code=$?
+          set -e
+          test "$code" = 2
+
+      - name: Install the released binary with curl
+        run: |
+          export HOME="$RUNNER_TEMP/curl-home"
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL https://github.com/achjqz/tongs/releases/latest/download/tongs-macos-universal.tar.gz | tar xz -C "$HOME/.local/bin" tongs
+          "$HOME/.local/bin/tongs" --version
